@@ -1,9 +1,8 @@
-name: Gyan Mukut Bot
+name: Gyan Mukut Morning Bot
 
 on:
   schedule:
-    - cron: '30 2 * * *'    # 8:00 AM IST (Morning)
-    - cron: '30 16 * * *'   # 10:00 PM IST (Night)
+    - cron: '30 2 * * *'
   workflow_dispatch:
 
 jobs:
@@ -22,7 +21,6 @@ jobs:
         run: pip install requests gspread google-auth
 
       - name: Run Morning Bot
-        if: github.event.schedule == '30 2 * * *'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
@@ -30,12 +28,3 @@ jobs:
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
         run: python morning_bot.py
-
-      - name: Run Night Bot
-        if: github.event.schedule == '30 16 * * *'
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
-          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
-          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-        run: python night_bot.py
