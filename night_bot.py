@@ -21,62 +21,93 @@ def get_sheet():
 
 def get_todays_questions(sheet):
     today = datetime.now().strftime("%d-%m-%Y")
-    records = sheet.get_all_records()
+    all_rows = sheet.get_all_values()
     todays = []
-    for row in records:
-        if row.get("Date") == today and row.get("Status") == "Morning":
-            todays.append(row)
+    for i, row in enumerate(all_rows[1:], start=2):
+        if len(row) >= 12 and row[0] == today and row[1] == "Morning":
+            todays.append({
+                "row_index": i,
+                "Date": row[0], "Status": row[1], "Subject": row[2],
+                "Question_EN": row[3], "Question_BN": row[4],
+                "OptionA": row[5], "OptionB": row[6],
+                "OptionC": row[7], "OptionD": row[8],
+                "Answer": row[9], "Explanation_EN": row[10],
+                "Explanation_BN": row[11],
+                "Difficulty": row[14] if len(row) > 14 else "Medium"
+            })
     return todays
 
-def update_status_to_night(sheet, todays_questions):
-    records = sheet.get_all_records()
+def get_encouragement(total_votes):
+    if total_votes >= 100:
+        return "🔥 Amazing participation today! You all are unstoppable!"
+    elif total_votes >= 50:
+        return "💪 Great effort today! Keep pushing forward!"
+    elif total_votes >= 20:
+        return "📚 Good participation! Invite your friends to join!"
+    else:
+        return "🌱 Every attempt counts! Share this with your study group!"
+
+def update_status(sheet, todays_questions):
     today = datetime.now().strftime("%d-%m-%Y")
-    for i, row in enumerate(records):
-        if row.get("Date") == today and row.get("Status") == "Morning":
-            sheet.update_cell(i + 2, 2, "Night")
-    print("Status updated to Night")
+    all_rows = sheet.get_all_values()
+    for i, row in enumerate(all_rows[1:], start=2):
+        if len(row) >= 2 and row[0] == today and row[1] == "Morning":
+            sheet.update_cell(i, 2, "Night")
+            print(f"Updated row {i} to Night")
 
 def send_message(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHANNEL_ID,
-        "text": text,
-        "parse_mode": "HTML"
-    }
+    payload = {"chat_id": TELEGRAM_CHANNEL_ID, "text": text, "parse_mode": "HTML"}
     r = requests.post(url, json=payload)
     print("Message status:", r.status_code)
-    print("Message response:", r.text[:200])
+    print("Response:", r.text[:200])
 
 def main():
     print("Starting Night Bot...")
+    today = datetime.now().strftime("%d-%m-%Y")
 
     sheet = get_sheet()
+    print("Sheet connected!")
+
     todays_questions = get_todays_questions(sheet)
-    print(f"Found {len(todays_questions)} questions for today")
+    print(f"Found {len(todays_questions)} questions")
 
     if not todays_questions:
-        print("No questions found for today!")
+        send_message("⚠️ আজকের প্রশ্নের উত্তর পাওয়া যায়নি।")
         return
 
-    message = "💡 <b>Answers & Explanations — Today's Challenge</b>\n"
-    message += "━━━━━━━━━━━━━━━━\n\n"
+    difficulty = todays_questions[0].get("Difficulty", "Medium")
+    difficulty_emoji = {"Easy": "🟢", "Medium": "🟡", "Hard": "🔴"}
 
-    subjects = ["📚 History / ইতিহাস",
-                "⚖️ Political Science / রাষ্ট্রবিজ্ঞান",
-                "🔬 General Science / সাধারণ বিজ্ঞান"]
+    subjects = [
+        "📚 History / ইতিহাস",
+        "⚖️ Polity / রাষ্ট্রবিজ্ঞান",
+        "🔬 Science / বিজ্ঞান"
+    ]
+
+    message = (
+        f"💡 <b>Answers &amp; Explanations — Today's Challenge</b>\n"
+        f"{difficulty_emoji.get(difficulty,'🟡')} Difficulty: <b>{difficulty}</b>\n"
+        f"━━━━━━━━━━━━━━━━\n\n"
+    )
 
     for i, q in enumerate(todays_questions):
         answer_letter = q.get("Answer", "")
-        option_key = f"Option{answer_letter}"
-        correct_option = q.get(option_key, "")
+        option_map = {
+            "A": q.get("OptionA",""), "B": q.get("OptionB",""),
+            "C": q.get("OptionC",""), "D": q.get("OptionD","")
+        }
+        correct_option = option_map.get(answer_letter, "")
+        subject = subjects[i] if i < len(subjects) else f"Q{i+1}"
 
-        message += f"<b>Ans {i+1}: {subjects[i]}</b>\n"
+        message += f"<b>Ans {i+1}: {subject}</b>\n"
         message += f"✅ <b>{answer_letter}) {correct_option}</b>\n\n"
-        message += f"📖 <b>Explanation:</b>\n"
-        message += f"{q.get('Explanation_EN', '')}\n\n"
-        message += f"📖 <b>ব্যাখ্যা:</b>\n"
-        message += f"{q.get('Explanation_BN', '')}\n\n"
+        message += f"📖 <b>Explanation:</b>\n{q.get('Explanation_EN','')}\n\n"
+        message += f"📖 <b>ব্যাখ্যা:</b>\n{q.get('Explanation_BN','')}\n\n"
         message += "━━━━━━━━━━━━━━━━\n\n"
+
+    encouragement = get_encouragement(50)
+    message += f"🎯 {encouragement}\n\n"
 
     message += (
         "🏆 <b>Crack Any Competitive Exam with Gyan Mukut!</b>\n\n"
@@ -89,7 +120,7 @@ def main():
     )
 
     send_message(message)
-    update_status_to_night(sheet, todays_questions)
-    print("Night bot done!")
+    update_status(sheet, todays_questions)
+    print("✅ Night Bot completed!")
 
 main()
