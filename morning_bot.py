@@ -21,51 +21,77 @@ def get_sheet():
     return sheet
 
 def get_previous_questions(sheet):
-    records = sheet.get_all_records()
-    previous = []
-    for row in records:
-        if row.get("Question_EN"):
-            previous.append(row["Question_EN"])
-    return previous
+    try:
+        records = sheet.get_all_records()
+        previous = []
+        for row in records:
+            if row.get("Question_EN"):
+                previous.append(row["Question_EN"])
+        return previous
+    except Exception as e:
+        print(f"Sheet read error: {e}")
+        return []
 
 def generate_mcqs(previous_questions):
-    prev_text = "\n".join(previous_questions[-30:]) if previous_questions else "None yet"
-    prompt = f"""You are a master educator for Indian competitive exams (WBCS, SSC CGL, CHSL, RRB NTPC, State PSC).
+    prev_text = "\n".join(previous_questions[-20:]) if previous_questions else "None yet"
 
-Previously asked questions (DO NOT repeat these or similar topics):
+    prompt = f"""You are a master educator for Indian competitive exams.
+
+Previously asked questions - DO NOT repeat:
 {prev_text}
 
-Generate exactly 3 NEW high-quality MCQs:
-- Q1: History (Indian or World)
-- Q2: Political Science (Indian Constitution or Polity)
-- Q3: General Science (Physics, Chemistry, or Biology)
+Generate exactly 3 MCQs:
+Q1: Indian History
+Q2: Indian Constitution / Polity  
+Q3: General Science
 
-Rules:
-- Each question must be UNIQUE and not repeat any previous topic
-- Each question must be strictly BILINGUAL (English + Bengali)
-- Each option must be BILINGUAL (English / Bengali)
-- Provide correct answer and detailed explanation in both languages
+STRICT RULES:
+- Bilingual: English + Bengali for question and all options
+- Return ONLY raw JSON array, no markdown, no backticks, no explanation
 
-Return ONLY a valid JSON array like this:
+JSON format:
 [
   {{
     "subject": "History",
-    "question_en": "Question in English?",
-    "question_bn": "প্রশ্ন বাংলায়?",
-    "option_a_en": "Option A English",
-    "option_a_bn": "অপশন এ বাংলা",
-    "option_b_en": "Option B English",
-    "option_b_bn": "অপশন বি বাংলা",
-    "option_c_en": "Option C English",
-    "option_c_bn": "অপশন সি বাংলা",
-    "option_d_en": "Option D English",
-    "option_d_bn": "অপশন ডি বাংলা",
+    "question_en": "English question?",
+    "question_bn": "Bengali question?",
+    "option_a_en": "English A",
+    "option_a_bn": "Bengali A",
+    "option_b_en": "English B",
+    "option_b_bn": "Bengali B",
+    "option_c_en": "English C",
+    "option_c_bn": "Bengali C",
+    "option_d_en": "English D",
+    "option_d_bn": "Bengali D",
+    "answer": "B",
+    "explanation_en": "English explanation.",
+    "explanation_bn": "Bengali explanation."
+  }},
+  {{
+    "subject": "Political Science",
+    "question_en": "...",
+    "question_bn": "...",
+    "option_a_en": "...", "option_a_bn": "...",
+    "option_b_en": "...", "option_b_bn": "...",
+    "option_c_en": "...", "option_c_bn": "...",
+    "option_d_en": "...", "option_d_bn": "...",
     "answer": "A",
-    "explanation_en": "Explanation in English.",
-    "explanation_bn": "ব্যাখ্যা বাংলায়।"
+    "explanation_en": "...",
+    "explanation_bn": "..."
+  }},
+  {{
+    "subject": "General Science",
+    "question_en": "...",
+    "question_bn": "...",
+    "option_a_en": "...", "option_a_bn": "...",
+    "option_b_en": "...", "option_b_bn": "...",
+    "option_c_en": "...", "option_c_bn": "...",
+    "option_d_en": "...", "option_d_bn": "...",
+    "answer": "C",
+    "explanation_en": "...",
+    "explanation_bn": "..."
   }}
-]
-Return ONLY the JSON array. No extra text. No markdown. No backticks."""
+]"""
 
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -73,26 +99,43 @@ Return ONLY the JSON array. No extra text. No markdown. No backticks."""
     }
     body = {
         "model": "llama3-8b-8192",
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are a JSON generator. Return only valid raw JSON arrays. Never use markdown or backticks."
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
         "max_tokens": 3000,
         "temperature": 0.7
     }
+
     response = requests.post(
         "https://api.groq.com/openai/v1/chat/completions",
         headers=headers,
-        json=body
+        json=body,
+        timeout=30
     )
-    print("Groq API status:", response.status_code)
+    print("Groq status:", response.status_code)
+    print("Groq full response:", response.text[:500])
+
+    if response.status_code != 200:
+        raise Exception(f"Groq API failed: {response.status_code} - {response.text}")
+
     data = response.json()
-    raw = data["choices"][0]["message"]["content"]
-    print("Groq response preview:", raw[:300])
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    raw = raw.strip()
+    raw = data["choices"][0]["message"]["content"].strip()
+    print("Raw content:", raw[:300])
+
+    raw = raw.replace("```json", "").replace("```", "").strip()
+    start = raw.find("[")
+    end = raw.rfind("]") + 1
+    raw = raw[start:end]
+
     mcqs = json.loads(raw)
+    print(f"Parsed {len(mcqs)} MCQs successfully")
     return mcqs
 
 def save_to_sheet(sheet, mcqs, today):
@@ -112,7 +155,18 @@ def save_to_sheet(sheet, mcqs, today):
             mcq["explanation_bn"]
         ]
         sheet.append_row(row)
-        print(f"Saved: {mcq['subject']}")
+        print(f"Saved to sheet: {mcq['subject']}")
+
+def send_message(text):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHANNEL_ID,
+        "text": text,
+        "parse_mode": "HTML"
+    }
+    r = requests.post(url, json=payload)
+    print("Message status:", r.status_code)
+    print("Message response:", r.text[:200])
 
 def send_poll(question_text, options, q_number):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPoll"
@@ -126,45 +180,39 @@ def send_poll(question_text, options, q_number):
     }
     r = requests.post(url, json=payload)
     print(f"Poll {q_number} status:", r.status_code)
-    print(f"Poll {q_number} response:", r.text[:300])
-
-def send_message(text):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHANNEL_ID,
-        "text": text,
-        "parse_mode": "HTML"
-    }
-    r = requests.post(url, json=payload)
-    print("Message status:", r.status_code)
+    print(f"Poll {q_number} response:", r.text[:200])
 
 def main():
     print("Starting Morning Bot...")
     today = datetime.now().strftime("%d-%m-%Y")
 
+    print("Connecting to Google Sheet...")
     sheet = get_sheet()
+    print("Sheet connected!")
+
     previous = get_previous_questions(sheet)
     print(f"Found {len(previous)} previous questions")
 
+    print("Generating MCQs with Groq...")
     mcqs = generate_mcqs(previous)
-    print(f"Generated {len(mcqs)} MCQs")
 
+    print("Saving to sheet...")
     save_to_sheet(sheet, mcqs, today)
-    print("Saved to sheet!")
 
+    print("Sending to Telegram...")
     intro = (
         "🌅 <b>Gyan Mukut Daily Challenge</b>\n"
-        "🎯 Target: WBCS | SSC CGL | RRB NTPC | State PSC\n"
+        "🎯 WBCS | SSC CGL | RRB NTPC | State PSC\n"
         "━━━━━━━━━━━━━━━━\n"
         "👇 Vote on all 3 polls below!\n"
-        "⏰ Answers + Explanations tonight at <b>10:00 PM</b>"
+        "⏰ Answers tonight at <b>10:00 PM</b>"
     )
     send_message(intro)
 
     subjects = [
         "📚 History / ইতিহাস",
-        "⚖️ Political Science / রাষ্ট্রবিজ্ঞান",
-        "🔬 General Science / সাধারণ বিজ্ঞান"
+        "⚖️ Polity / রাষ্ট্রবিজ্ঞান",
+        "🔬 Science / বিজ্ঞান"
     ]
 
     for i, mcq in enumerate(mcqs):
@@ -174,9 +222,9 @@ def main():
             f"C) {mcq['option_c_en']} / {mcq['option_c_bn']}",
             f"D) {mcq['option_d_en']} / {mcq['option_d_bn']}"
         ]
-        question_text = f"{subjects[i]}\nQ{i+1}. {mcq['question_en']}\n{mcq['question_bn']}"
-        send_poll(question_text, options, i+1)
+        q_text = f"{subjects[i]}\nQ{i+1}. {mcq['question_en']}\n{mcq['question_bn']}"
+        send_poll(q_text, options, i+1)
 
-    print("Morning bot done!")
+    print("✅ Morning bot completed successfully!")
 
 main()
