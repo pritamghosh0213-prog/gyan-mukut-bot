@@ -5,10 +5,9 @@ from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
 
-# === CONFIG ===
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 GOOGLE_SHEET_ID = os.environ.get("GOOGLE_SHEET_ID")
 GOOGLE_CREDENTIALS = os.environ.get("GOOGLE_CREDENTIALS")
 
@@ -66,27 +65,33 @@ Return ONLY a valid JSON array like this:
     "explanation_bn": "ব্যাখ্যা বাংলায়।"
   }}
 ]
-Return ONLY the JSON array. No extra text."""
+Return ONLY the JSON array. No extra text. No markdown. No backticks."""
 
     headers = {
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json"
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
     }
     body = {
-        "model": "claude-haiku-4-5-20251001",
+        "model": "llama3-8b-8192",
+        "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 3000,
-        "messages": [{"role": "user", "content": prompt}]
+        "temperature": 0.7
     }
     response = requests.post(
-        "https://api.anthropic.com/v1/messages",
+        "https://api.groq.com/openai/v1/chat/completions",
         headers=headers,
         json=body
     )
-    print("Claude API status:", response.status_code)
+    print("Groq API status:", response.status_code)
     data = response.json()
-    raw = data["content"][0]["text"]
-    print("Claude response:", raw[:500])
+    raw = data["choices"][0]["message"]["content"]
+    print("Groq response preview:", raw[:300])
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    raw = raw.strip()
     mcqs = json.loads(raw)
     return mcqs
 
@@ -109,20 +114,19 @@ def save_to_sheet(sheet, mcqs, today):
         sheet.append_row(row)
         print(f"Saved: {mcq['subject']}")
 
-def send_poll(question_en, question_bn, options, q_number):
-    question_text = f"📝 Q{q_number}. {question_en}\n{question_bn}"
+def send_poll(question_text, options, q_number):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPoll"
     payload = {
         "chat_id": TELEGRAM_CHANNEL_ID,
         "question": question_text[:300],
-        "options": options,
+        "options": [opt[:100] for opt in options],
         "is_anonymous": True,
         "type": "regular",
         "allows_multiple_answers": False
     }
     r = requests.post(url, json=payload)
     print(f"Poll {q_number} status:", r.status_code)
-    print(f"Poll {q_number} response:", r.text[:200])
+    print(f"Poll {q_number} response:", r.text[:300])
 
 def send_message(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -146,8 +150,8 @@ def main():
     print(f"Generated {len(mcqs)} MCQs")
 
     save_to_sheet(sheet, mcqs, today)
+    print("Saved to sheet!")
 
-    # Send intro message
     intro = (
         "🌅 <b>Gyan Mukut Daily Challenge</b>\n"
         "🎯 Target: WBCS | SSC CGL | RRB NTPC | State PSC\n"
@@ -157,10 +161,11 @@ def main():
     )
     send_message(intro)
 
-    # Send 3 polls
-    subjects = ["📚 History / ইতিহাস",
-                "⚖️ Political Science / রাষ্ট্রবিজ্ঞান",
-                "🔬 General Science / সাধারণ বিজ্ঞান"]
+    subjects = [
+        "📚 History / ইতিহাস",
+        "⚖️ Political Science / রাষ্ট্রবিজ্ঞান",
+        "🔬 General Science / সাধারণ বিজ্ঞান"
+    ]
 
     for i, mcq in enumerate(mcqs):
         options = [
@@ -169,8 +174,8 @@ def main():
             f"C) {mcq['option_c_en']} / {mcq['option_c_bn']}",
             f"D) {mcq['option_d_en']} / {mcq['option_d_bn']}"
         ]
-        question = f"{subjects[i]}\n{mcq['question_en']}\n{mcq['question_bn']}"
-        send_poll(question, "", options, i+1)
+        question_text = f"{subjects[i]}\nQ{i+1}. {mcq['question_en']}\n{mcq['question_bn']}"
+        send_poll(question_text, options, i+1)
 
     print("Morning bot done!")
 
